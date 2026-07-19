@@ -358,7 +358,43 @@ else
     echo "   (pipx no está: corré con --tools para tener también check50/style50/submit50)"
 fi
 
+# ── 8. Carpeta de trabajo + lanzador que la abre ──
+# CRÍTICO: VS Code sin carpeta abierta NO muestra el explorador, y como acá
+# la activity bar está oculta (look CS50) el alumno se queda sin ningún botón
+# visible para abrirlo: pantalla vacía. cs50.dev no tiene el problema porque
+# el codespace siempre arranca con una carpeta. Se replica eso: una carpeta
+# del alumno + un lanzador de menú que la abre siempre.
+WORK_DIR="$HOME/cs50"
+mkdir -p "$WORK_DIR"
+if [ ! -e "$WORK_DIR/hola.c" ]; then
+    cat > "$WORK_DIR/hola.c" << 'HOLA_C'
+#include <stdio.h>
+
+int main(void)
+{
+    printf("hola, mundo\n");
+}
+HOLA_C
+fi
+
+APP_DIR="$HOME/.local/share/applications"
+mkdir -p "$APP_DIR"
+cat > "$APP_DIR/cs50-code.desktop" << DESKTOP
+[Desktop Entry]
+Type=Application
+Name=VS Code (CS50)
+Comment=Editor del taller, abre la carpeta de trabajo $WORK_DIR
+Exec=code --new-window $WORK_DIR
+Icon=vscode
+Categories=Development;IDE;
+StartupNotify=true
+DESKTOP
+update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
+ok "Carpeta de trabajo $WORK_DIR + lanzador 'VS Code (CS50)' en el menú"
+
 echo
-ok "Listo. Abrí VS Code con: code"
+ok "Listo. Abrí el editor desde el menú: 'VS Code (CS50)'"
+echo "   (o desde una terminal, SIEMPRE con una carpeta: code ~/cs50)"
+echo "   Ojo: 'code' a secas abre sin carpeta y no se ve el explorador."
 echo "   Layout CS50: explorador a la izquierda (Ctrl+B lo muestra/oculta),"
 echo "   terminal abajo (Ctrl+\`), barra de menú oculta (Alt la muestra)."
