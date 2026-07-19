@@ -278,7 +278,13 @@ ok "Configuración CS50 aplicada en $USER_DIR/settings.json"
 # VS Code no tiene setting para abrir el panel de terminal al arrancar
 # (workbench.startupEditor "terminal" la abre en el área del editor, que no
 # es lo que hace cs50.dev). Esta extensión local la abre en el panel.
-EXT_DIR="$HOME/.vscode/extensions/cs50-taller.terminal-abajo-1.0.0"
+# OJO: NO alcanza con copiar la carpeta a ~/.vscode/extensions/. VS Code usa
+# extensions.json de ese directorio como registro, y una extensión copiada a
+# mano DESPUÉS de que ese archivo existe (lo crea la sección 2 al instalar las
+# del marketplace) queda invisible: no carga y la terminal no aparece. Hay que
+# empaquetarla como .vsix e instalarla con --install-extension, como cualquier
+# otra. Verificado en perfil limpio: copiada a mano no carga, como .vsix sí.
+EXT_DIR="$(mktemp -d)/terminal-abajo"
 mkdir -p "$EXT_DIR"
 
 cat > "$EXT_DIR/package.json" << 'EXT_PKG'
@@ -308,7 +314,48 @@ function deactivate() {}
 
 module.exports = { activate, deactivate };
 EXT_JS
-ok "Extensión local 'terminal-abajo' instalada en $EXT_DIR"
+
+if command -v python3 >/dev/null 2>&1; then
+    VSIX="$EXT_DIR/../terminal-abajo.vsix"
+    python3 - "$EXT_DIR" "$VSIX" << 'MK_VSIX'
+import os, sys, zipfile
+
+src, out = sys.argv[1], sys.argv[2]
+manifest = '''<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+  <Metadata>
+    <Identity Language="en-US" Id="terminal-abajo" Version="1.0.0" Publisher="cs50-taller"/>
+    <DisplayName>Terminal abajo (estilo CS50)</DisplayName>
+    <Description>Abre la terminal integrada en el panel inferior al iniciar</Description>
+  </Metadata>
+  <Installation><InstallationTarget Id="Microsoft.VisualStudio.Code"/></Installation>
+  <Dependencies/>
+  <Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/></Assets>
+</PackageManifest>
+'''
+ctypes = '''<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="json" ContentType="application/json"/>
+  <Default Extension="js" ContentType="application/javascript"/>
+  <Default Extension="vsixmanifest" ContentType="text/xml"/>
+</Types>
+'''
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("extension.vsixmanifest", manifest)
+    z.writestr("[Content_Types].xml", ctypes)
+    for f in ("package.json", "extension.js"):
+        z.write(os.path.join(src, f), "extension/" + f)
+MK_VSIX
+    if code --install-extension "$VSIX" --force >/dev/null 2>&1; then
+        ok "Extensión 'terminal-abajo' instalada (terminal abajo al iniciar)"
+    else
+        echo "   (falló instalar terminal-abajo; la terminal se abre igual con Ctrl+\`)"
+    fi
+    rm -rf "$(dirname "$EXT_DIR")"
+else
+    echo "   (falta python3: no se pudo empaquetar terminal-abajo. La terminal"
+    echo "    se abre a mano con Ctrl+\` — instalá python y volvé a correr el script.)"
+fi
 
 # ── 5. Ocultar vistas: OUTLINE/TIMELINE y pestañas extra del panel ──
 # La visibilidad de estas vistas no es un setting: VS Code la guarda en la
