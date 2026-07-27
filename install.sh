@@ -71,6 +71,7 @@ CORE_EXTENSIONS=(
     mathematic.vscode-pdf
     inferrinizzard.prettier-sql-vscode
     ms-ceintl.vscode-language-pack-es   # interfaz en español
+    bitlang.cobol                       # COBOL: resaltado + snippets (sin Java)
 )
 
 EXTRA_EXTENSIONS=(
@@ -389,6 +390,26 @@ if [ "$WITH_TOOLS" -eq 1 ]; then
     sudo pacman -S --needed --noconfirm \
         gcc clang gdb make valgrind python python-pip python-pipx sqlite git
     ok "Herramientas instaladas."
+
+    # GnuCOBOL (cobc) — compilador COBOL. No está en los repos oficiales,
+    # solo en AUR; compila a C y linkea con gcc (recién instalado arriba).
+    # Va acá, con el resto de los compiladores del taller.
+    if command -v cobc >/dev/null 2>&1 || pacman -Q gnucobol >/dev/null 2>&1; then
+        ok "GnuCOBOL ya instalado: $(cobc --version 2>/dev/null | head -1)"
+    else
+        AUR_HELPER=""
+        for h in paru yay; do
+            command -v "$h" >/dev/null 2>&1 && { AUR_HELPER="$h"; break; }
+        done
+        if [ -n "$AUR_HELPER" ]; then
+            msg "Instalando gnucobol desde AUR con $AUR_HELPER…"
+            "$AUR_HELPER" -S --needed --noconfirm gnucobol \
+                && ok "GnuCOBOL instalado (compilá con: cobc -x hola.cob && ./hola)" \
+                || echo "   (falló gnucobol; reintentá con: $AUR_HELPER -S gnucobol)"
+        else
+            echo "   (sin paru/yay: no se pudo instalar gnucobol. Instalalo con: paru -S gnucobol)"
+        fi
+    fi
 fi
 
 # ── 7. Herramientas oficiales de CS50 (check50/style50/submit50) ──
@@ -422,6 +443,18 @@ int main(void)
     printf("hola, mundo\n");
 }
 HOLA_C
+fi
+if [ ! -e "$WORK_DIR/hola.cob" ]; then
+    # Formato fijo clásico (el default de cobc): las divisiones en columna 8
+    # (área A), las sentencias en columna 12 (área B). Es el COBOL que se ve
+    # en producción; se compila con: cobc -x hola.cob
+    cat > "$WORK_DIR/hola.cob" << 'HOLA_COB'
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID. hola.
+       PROCEDURE DIVISION.
+           DISPLAY "hola, mundo".
+           STOP RUN.
+HOLA_COB
 fi
 
 APP_DIR="$HOME/.local/share/applications"
