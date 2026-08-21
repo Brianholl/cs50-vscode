@@ -10,9 +10,9 @@
 # https://github.com/cs50/codespace (devcontainer.json).
 #
 # Uso:
-#   ./install.sh              instalación estándar
-#   ./install.sh --extra      además: Docker, Live Share y Java
-#   ./install.sh --tools      además: gcc, clang, gdb, python, sqlite, etc.
+#   ./install.sh              instalación estándar (incluye Java y Python)
+#   ./install.sh --extra      además: Docker y Live Share
+#   ./install.sh --tools      además: gcc, clang, gdb, python, java (JDK), sqlite, etc.
 #   ./install.sh --extra --tools
 #
 # Requiere: CachyOS/Arch con paru o yay (CachyOS trae paru de fábrica).
@@ -60,25 +60,26 @@ fi
 
 # ── 2. Extensiones ──
 # Núcleo: las mismas que usa el Codespace de CS50 y que existen en el
-# marketplace. Las extensiones propias de CS50 (ddb50, style50, design50,
+# marketplace, más Java y Python como lenguajes de primera clase (a la par
+# de C). Las extensiones propias de CS50 (ddb50, style50, design50,
 # explain50) son .vsix privados del contenedor y no se pueden instalar.
 CORE_EXTENSIONS=(
     github.github-vscode-theme          # theme GitHub Dark/Light Default
     ms-python.python
     ms-python.autopep8                  # formateador Python de CS50
     ms-vscode.cpptools                  # C/C++ con clang-format estilo CS50
+    redhat.java                         # Java: Language Support for Java(TM) by Red Hat
+    vscjava.vscode-java-debug           # Java: debugger
     ms-vscode.hexeditor
     mathematic.vscode-pdf
     inferrinizzard.prettier-sql-vscode
     ms-ceintl.vscode-language-pack-es   # interfaz en español
-    bitlang.cobol                       # COBOL: resaltado + snippets (sin Java)
+    bitlang.cobol                       # COBOL: resaltado + snippets
 )
 
 EXTRA_EXTENSIONS=(
     ms-azuretools.vscode-docker
     ms-vsliveshare.vsliveshare          # colaboración en vivo entre alumnos
-    redhat.java
-    vscjava.vscode-java-debug
 )
 
 install_extensions() {
@@ -388,7 +389,7 @@ fi
 if [ "$WITH_TOOLS" -eq 1 ]; then
     msg "Instalando herramientas de desarrollo (pide sudo)…"
     sudo pacman -S --needed --noconfirm \
-        gcc clang gdb make valgrind python python-pip python-pipx sqlite git
+        gcc clang gdb make valgrind python python-pip python-pipx jdk-openjdk sqlite git
     ok "Herramientas instaladas."
 
     # GnuCOBOL (cobc) — compilador COBOL. No está en los repos oficiales,
@@ -443,6 +444,15 @@ int main(void)
     printf("hola, mundo\n");
 }
 HOLA_C
+fi
+if [ ! -e "$WORK_DIR/hola.java" ]; then
+    cat > "$WORK_DIR/hola.java" << 'HOLA_JAVA'
+public class hola {
+    public static void main(String[] args) {
+        System.out.println("hola, mundo");
+    }
+}
+HOLA_JAVA
 fi
 if [ ! -e "$WORK_DIR/hola.cob" ]; then
     # Formato fijo clásico (el default de cobc): las divisiones en columna 8

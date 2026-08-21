@@ -15,9 +15,9 @@ copiar ese único archivo (USB, correo, git) a cada máquina y correrlo como
 el usuario del alumno (no root):
 
 ```bash
-./install.sh                  # VS Code + extensiones núcleo + settings
-./install.sh --extra          # + Docker, Live Share, Java
-./install.sh --tools          # + gcc, clang, gdb, valgrind, python, sqlite
+./install.sh                  # VS Code + extensiones núcleo (C, Java, Python...) + settings
+./install.sh --extra          # + Docker, Live Share
+./install.sh --tools          # + gcc, clang, gdb, valgrind, python, jdk-openjdk, sqlite
 ./install.sh --extra --tools  # todo
 ```
 
@@ -41,8 +41,9 @@ El script:
   oculta, sin minimap, sin breadcrumbs, sin command center, sin folding,
   sin squiggles de error, sin hovers ni sugerencias automáticas, autosave.
 - **Extensiones:** Python + autopep8, C/C++ (cpptools con clang-format
-  estilo CS50), editor hexadecimal, visor de PDF, Prettier SQL, packs de
-  idioma, Docker, Live Share, Java.
+  estilo CS50), Java (redhat.java + debugger), editor hexadecimal, visor
+  de PDF, Prettier SQL, packs de idioma, COBOL. Con `--extra`: Docker,
+  Live Share.
 
 ## Ajustes respecto del original (para escritorio)
 
