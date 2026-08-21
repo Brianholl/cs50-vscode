@@ -105,8 +105,12 @@ fi
 
 # Réplica del devcontainer.json de cs50/codespace, sin las claves exclusivas
 # de Codespaces (puertos remotos, gitdoc, extension-uninstaller, runtime de
-# Java del contenedor) y con tres ajustes para escritorio: tema oscuro fijo,
-# barra de actividad oculta y barra de menú en modo toggle (Alt la muestra).
+# Java del contenedor) y con cuatro ajustes para escritorio: tema oscuro
+# fijo, barra de actividad oculta, barra de menú en modo toggle (Alt la
+# muestra) y python.defaultInterpreterPath fijo — sin esto, F5 sobre un
+# .py suelto (sin venv/proyecto) se queda pidiendo elegir un entorno vía
+# la extensión ms-python.vscode-python-envs (dependencia de ms-python.python
+# desde 2024) y nunca llega a correr nada.
 cat > "$USER_DIR/settings.json" << 'CS50_SETTINGS'
 {
     "accessibility.signals.terminalBell": {
@@ -196,6 +200,7 @@ cat > "$USER_DIR/settings.json" << 'CS50_SETTINGS'
     "problems.decorations.enabled": false,
     "problems.visibility": false,
 
+    "python.defaultInterpreterPath": "/usr/bin/python3",
     "python.terminal.executeInFileDir": true,
     "python.terminal.shellIntegration.enabled": false,
     "[python]": {

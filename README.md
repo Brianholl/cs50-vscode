@@ -59,6 +59,12 @@ El script:
   lateral secundaria con el chat aparece por defecto al abrir carpetas.
 - **Sin "Restricted Mode"** (`security.workspace.trust.enabled: false`):
   evita el banner/diálogo de confianza al abrir cualquier carpeta en clase.
+- **Intérprete de Python fijo** (`python.defaultInterpreterPath:
+  /usr/bin/python3`): en el Codespace el contenedor solo tiene un Python
+  posible y la extensión lo usa sin preguntar; en escritorio, sin este
+  setting, F5 sobre un `.py` suelto (sin `venv`/proyecto) se queda pidiendo
+  elegir un entorno vía `ms-python.vscode-python-envs` (dependencia de
+  `ms-python.python` desde 2024) y nunca llega a correr nada.
 - **Terminal abajo al iniciar**: VS Code no tiene setting para abrir el
   panel de terminal al arrancar (`workbench.startupEditor: "terminal"`
   existe pero la abre en el área del editor y genera terminales
