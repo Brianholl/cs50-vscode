@@ -384,22 +384,35 @@ cat > "$ORACLE_DIR/package.json" << 'ORACLE_PKG'
     "displayName": "Oracle (metalenguaje de medidas)",
     "description": "Resaltado, diagnósticos y completado para .oracle y .caso",
     "publisher": "cs50-taller",
-    "version": "1.0.0",
-    "engines": { "vscode": "^1.75.0" },
+    "version": "1.0.1",
+    "engines": {
+        "vscode": "^1.75.0"
+    },
     "main": "./extension.js",
-    "activationEvents": ["onLanguage:oracle"],
+    "activationEvents": [
+        "onLanguage:oracle"
+    ],
     "contributes": {
-        "languages": [{
-            "id": "oracle",
-            "aliases": ["Oracle"],
-            "extensions": [".oracle", ".caso"],
-            "configuration": "./lenguaje.json"
-        }],
-        "grammars": [{
-            "language": "oracle",
-            "scopeName": "source.oracle",
-            "path": "./oracle.tmLanguage.json"
-        }]
+        "languages": [
+            {
+                "id": "oracle",
+                "aliases": [
+                    "Oracle"
+                ],
+                "extensions": [
+                    ".oracle",
+                    ".caso"
+                ],
+                "configuration": "./lenguaje.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "oracle",
+                "scopeName": "source.oracle",
+                "path": "./oracle.tmLanguage.json"
+            }
+        ]
     }
 }
 ORACLE_PKG
@@ -418,19 +431,43 @@ ORACLE_LANG
 
 cat > "$ORACLE_DIR/oracle.tmLanguage.json" << 'ORACLE_GRAM'
 {
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Oracle",
     "scopeName": "source.oracle",
+    "fileTypes": ["oracle", "caso"],
     "patterns": [
         { "match": "#.*$", "name": "comment.line.number-sign.oracle" },
-        { "match": "\\b(medida|ninguno|ninguno-par|ninguno-requiere|peor|defmacro|caso|relacion)\\b",
+
+        { "comment": "Encabezado: `ninguno dominio.nombre:` — la forma y el id de la medida",
+          "match": "^(medida|ninguno|ninguno-par|ninguno-requiere|peor|defmacro|caso|relacion)\\s+([\\w.-]+)",
+          "captures": {
+            "1": { "name": "storage.type.oracle" },
+            "2": { "name": "entity.name.function.oracle" } } },
+
+        { "comment": "Los cinco operadores del álgebra, más las cláusulas obligatorias",
+          "match": "^\\s*(de|donde|unir|agrupar|resumen|umbral|requiere|alcance|clave|agregado|evidencia|leccion|sintoma|origen|titulo)\\b",
           "name": "keyword.control.oracle" },
-        { "match": "\\b(de|donde|unir|agrupar|resumen|umbral|requiere|alcance|porque|segun|clave|agregado)\\b",
-          "name": "keyword.operator.oracle" },
-        { "match": "\\b(medicion|contrato|convencion|tanteo|observada|construida|generada|falso_verde|falso_rojo|verde_correcto|deuda_de_dise\u00f1o)\\b",
+
+        { "comment": "`porque` y `segun` viajan dentro de la línea del umbral",
+          "match": "\\b(porque|segun)\\b", "name": "keyword.control.oracle" },
+
+        { "comment": "Conjuntos cerrados: si escribís uno que no existe, no se pinta",
+          "match": "\\b(medicion|contrato|convencion|tanteo|observada|construida|generada|sin_declarar|falso_verde|falso_rojo|verde_correcto|deuda_de_dise\u00f1o|medida_correcta_conclusion_errada|mutacion|persona|accidente|herramienta_ajena|observacion|sin_unidad|adimensional)\\b",
           "name": "constant.language.oracle" },
+
         { "match": "\\b(contar|suma|max|min|promedio)\\b", "name": "support.function.oracle" },
-        { "begin": "\"", "end": "\"", "name": "string.quoted.double.oracle" },
+
+        { "comment": "Acceso a campo: el alias apagado, el campo encendido",
+          "match": "\\b([a-z_][\\w]*)\\.([a-z_][\\w]*)\\b",
+          "captures": { "1": { "name": "variable.parameter.oracle" },
+                        "2": { "name": "variable.other.property.oracle" } } },
+
+        { "match": "\\$[\\w]+", "name": "variable.language.oracle" },
+        { "begin": "\"", "end": "\"", "name": "string.quoted.double.oracle",
+          "patterns": [{ "match": "`[^`]*`", "name": "markup.inline.raw.oracle" }] },
         { "match": "\\b\\d+(\\.\\d+)?\\b", "name": "constant.numeric.oracle" },
-        { "match": "\\b(y|o|no|true|false)\\b", "name": "keyword.other.oracle" }
+        { "match": "(<=|>=|==|!=|<|>)", "name": "keyword.operator.comparison.oracle" },
+        { "match": "\\b(y|o|no|true|false|null)\\b", "name": "keyword.other.oracle" }
     ]
 }
 ORACLE_GRAM
@@ -575,7 +612,7 @@ src, out = sys.argv[1], sys.argv[2]
 manifest = '''<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
-    <Identity Language="en-US" Id="oracle-lenguaje" Version="1.0.0" Publisher="cs50-taller"/>
+    <Identity Language="en-US" Id="oracle-lenguaje" Version="1.0.1" Publisher="cs50-taller"/>
     <DisplayName>Oracle (metalenguaje de medidas)</DisplayName>
     <Description>Resaltado, diagnosticos y completado para .oracle y .caso</Description>
   </Metadata>
@@ -600,6 +637,7 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
 MK_ORACLE_VSIX
     if code --install-extension "$ORACLE_VSIX" --force >/dev/null 2>&1; then
         ok "Extensión 'oracle-lenguaje' instalada (.oracle y .caso)"
+        echo "   (si VS Code está abierto: Ctrl+Shift+P → Developer: Reload Window)"
         [ -f "$HOME/Dev/oracle/tools/lsp.py" ] \
             || echo "   (nota: ~/Dev/oracle no está clonado; el resaltado anda, los diagnósticos no)"
     else
