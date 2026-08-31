@@ -364,6 +364,250 @@ else
     echo "    se abre a mano con Ctrl+\` — instalá python y volvé a correr el script.)"
 fi
 
+# ── 4bis. Extensión de Oracle (metalenguaje de medidas) ──
+# Resaltado, diagnósticos y completado para `.oracle` y `.caso`. Habla el
+# protocolo LSP a mano contra ~/Dev/oracle/tools/lsp.py: el MISMO servidor que
+# usa emacs50, así que ningún diagnóstico se reimplementa acá.
+#
+# Sin dependencias de npm a propósito: el .vsix se arma con python+zipfile igual
+# que `terminal-abajo`, para que el taller siga siendo un solo archivo copiable
+# por USB. Traer `vscode-languageclient` obligaría a npm y a vsce en cada máquina.
+#
+# Si ~/Dev/oracle no está clonado, la extensión avisa una vez y no molesta más.
+if command -v python3 >/dev/null 2>&1; then
+    ORACLE_DIR="$(mktemp -d)/oracle-lenguaje"
+    mkdir -p "$ORACLE_DIR"
+
+cat > "$ORACLE_DIR/package.json" << 'ORACLE_PKG'
+{
+    "name": "oracle-lenguaje",
+    "displayName": "Oracle (metalenguaje de medidas)",
+    "description": "Resaltado, diagnósticos y completado para .oracle y .caso",
+    "publisher": "cs50-taller",
+    "version": "1.0.0",
+    "engines": { "vscode": "^1.75.0" },
+    "main": "./extension.js",
+    "activationEvents": ["onLanguage:oracle"],
+    "contributes": {
+        "languages": [{
+            "id": "oracle",
+            "aliases": ["Oracle"],
+            "extensions": [".oracle", ".caso"],
+            "configuration": "./lenguaje.json"
+        }],
+        "grammars": [{
+            "language": "oracle",
+            "scopeName": "source.oracle",
+            "path": "./oracle.tmLanguage.json"
+        }]
+    }
+}
+ORACLE_PKG
+
+cat > "$ORACLE_DIR/lenguaje.json" << 'ORACLE_LANG'
+{
+    "comments": { "lineComment": "#" },
+    "brackets": [["(", ")"], ["[", "]"]],
+    "autoClosingPairs": [["(", ")"], ["\"", "\""]],
+    "indentationRules": {
+        "increaseIndentPattern": ":\\s*$",
+        "decreaseIndentPattern": "^\\s*$"
+    }
+}
+ORACLE_LANG
+
+cat > "$ORACLE_DIR/oracle.tmLanguage.json" << 'ORACLE_GRAM'
+{
+    "scopeName": "source.oracle",
+    "patterns": [
+        { "match": "#.*$", "name": "comment.line.number-sign.oracle" },
+        { "match": "\\b(medida|ninguno|ninguno-par|ninguno-requiere|peor|defmacro|caso|relacion)\\b",
+          "name": "keyword.control.oracle" },
+        { "match": "\\b(de|donde|unir|agrupar|resumen|umbral|requiere|alcance|porque|segun|clave|agregado)\\b",
+          "name": "keyword.operator.oracle" },
+        { "match": "\\b(medicion|contrato|convencion|tanteo|observada|construida|generada|falso_verde|falso_rojo|verde_correcto|deuda_de_dise\u00f1o)\\b",
+          "name": "constant.language.oracle" },
+        { "match": "\\b(contar|suma|max|min|promedio)\\b", "name": "support.function.oracle" },
+        { "begin": "\"", "end": "\"", "name": "string.quoted.double.oracle" },
+        { "match": "\\b\\d+(\\.\\d+)?\\b", "name": "constant.numeric.oracle" },
+        { "match": "\\b(y|o|no|true|false)\\b", "name": "keyword.other.oracle" }
+    ]
+}
+ORACLE_GRAM
+
+cat > "$ORACLE_DIR/extension.js" << 'ORACLE_JS'
+// Cliente mínimo del servidor LSP de Oracle, sin dependencias de npm.
+//
+// El protocolo se habla a mano —cabeceras `Content-Length` y JSON— en vez de usar
+// `vscode-languageclient`. El motivo no es purismo: el instalador arma el .vsix con
+// Python y zipfile, sin `npm` ni `vsce`, para que el taller siga siendo un solo
+// archivo copiable por USB. Traer una dependencia rompería eso.
+//
+// Y el servidor es el MISMO que usa Emacs: acá no se reimplementa ningún
+// diagnóstico. Duplicar la traducción de errores sería el defecto que este
+// proyecto persigue.
+const vscode = require('vscode');
+const { spawn } = require('child_process');
+const path = require('path');
+
+let servidor = null, pendientes = new Map(), siguienteId = 1, buffer = Buffer.alloc(0);
+let diagnosticos = null;
+
+function rutaDelServidor() {
+    return path.join(process.env.HOME || '', 'Dev', 'oracle', 'tools', 'lsp.py');
+}
+
+function enviar(mensaje) {
+    if (!servidor) return;
+    const cuerpo = Buffer.from(JSON.stringify({ jsonrpc: '2.0', ...mensaje }), 'utf8');
+    servidor.stdin.write(`Content-Length: ${cuerpo.length}\r\n\r\n`);
+    servidor.stdin.write(cuerpo);
+}
+
+function pedir(method, params) {
+    const id = siguienteId++;
+    return new Promise((resolve) => {
+        pendientes.set(id, resolve);
+        enviar({ id, method, params });
+        setTimeout(() => { if (pendientes.delete(id)) resolve(null); }, 5000);
+    });
+}
+
+// Un mensaje puede llegar partido en varios `data`, y varios mensajes pueden llegar
+// juntos en uno solo. Sin este bucle el cliente anda en las pruebas y falla con un
+// archivo grande, que es la peor forma de fallar.
+function alRecibir(trozo) {
+    buffer = Buffer.concat([buffer, trozo]);
+    for (;;) {
+        const corte = buffer.indexOf('\r\n\r\n');
+        if (corte < 0) return;
+        const cabeceras = buffer.subarray(0, corte).toString('utf8');
+        const largo = /Content-Length: (\d+)/i.exec(cabeceras);
+        if (!largo) return;
+        const desde = corte + 4, hasta = desde + Number(largo[1]);
+        if (buffer.length < hasta) return;
+        let mensaje = null;
+        try { mensaje = JSON.parse(buffer.subarray(desde, hasta).toString('utf8')); } catch (e) { /* se descarta */ }
+        buffer = buffer.subarray(hasta);
+        if (!mensaje) continue;
+        if (mensaje.id !== undefined && pendientes.has(mensaje.id)) {
+            pendientes.get(mensaje.id)(mensaje.result);
+            pendientes.delete(mensaje.id);
+        } else if (mensaje.method === 'textDocument/publishDiagnostics') {
+            publicar(mensaje.params);
+        }
+    }
+}
+
+function publicar(params) {
+    if (!diagnosticos) return;
+    const uri = vscode.Uri.parse(params.uri);
+    diagnosticos.set(uri, (params.diagnostics || []).map((d) => {
+        const r = d.range;
+        const diag = new vscode.Diagnostic(
+            new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character),
+            d.message,
+            d.severity === 1 ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
+        diag.source = 'oracle';
+        return diag;
+    }));
+}
+
+function abrir(doc) {
+    if (doc.languageId !== 'oracle') return;
+    enviar({ method: 'textDocument/didOpen', params: { textDocument: {
+        uri: doc.uri.toString(), languageId: 'oracle', version: doc.version, text: doc.getText() } } });
+}
+
+function activate(contexto) {
+    diagnosticos = vscode.languages.createDiagnosticCollection('oracle');
+    contexto.subscriptions.push(diagnosticos);
+
+    servidor = spawn('python3', [rutaDelServidor()], { stdio: ['pipe', 'pipe', 'pipe'] });
+    servidor.on('error', () => {
+        vscode.window.showWarningMessage(
+            'Oracle: no se pudo iniciar ' + rutaDelServidor() + '. ¿Está clonado ~/Dev/oracle?');
+        servidor = null;
+    });
+    servidor.stdout.on('data', alRecibir);
+
+    enviar({ id: siguienteId++, method: 'initialize', params: {
+        processId: process.pid,
+        rootUri: vscode.workspace.workspaceFolders?.[0]?.uri.toString() ?? null,
+        capabilities: {} } });
+    enviar({ method: 'initialized', params: {} });
+
+    contexto.subscriptions.push(
+        vscode.workspace.onDidOpenTextDocument(abrir),
+        vscode.workspace.onDidSaveTextDocument(abrir),
+        vscode.workspace.onDidChangeTextDocument((e) => abrir(e.document)));
+    vscode.workspace.textDocuments.forEach(abrir);
+
+    contexto.subscriptions.push(vscode.languages.registerCompletionItemProvider('oracle', {
+        async provideCompletionItems(doc, pos) {
+            abrir(doc);
+            const r = await pedir('textDocument/completion', {
+                textDocument: { uri: doc.uri.toString() },
+                position: { line: pos.line, character: pos.character } });
+            const items = Array.isArray(r) ? r : (r && r.items) || [];
+            return items.map((i) => {
+                const it = new vscode.CompletionItem(i.label, vscode.CompletionItemKind.Field);
+                // `detail` es donde viaja la UNIDAD del campo: `flotante · cm`. Es lo que ningún
+                // otro editor muestra, y la razón de que este completado valga la pena.
+                if (i.detail) it.detail = i.detail;
+                if (i.documentation) it.documentation = i.documentation;
+                return it;
+            });
+        }
+    }, '.', ' '));
+}
+
+function deactivate() { if (servidor) servidor.kill(); }
+
+module.exports = { activate, deactivate };
+ORACLE_JS
+
+    ORACLE_VSIX="$ORACLE_DIR/../oracle-lenguaje.vsix"
+    python3 - "$ORACLE_DIR" "$ORACLE_VSIX" << 'MK_ORACLE_VSIX'
+import os, sys, zipfile
+
+src, out = sys.argv[1], sys.argv[2]
+manifest = '''<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+  <Metadata>
+    <Identity Language="en-US" Id="oracle-lenguaje" Version="1.0.0" Publisher="cs50-taller"/>
+    <DisplayName>Oracle (metalenguaje de medidas)</DisplayName>
+    <Description>Resaltado, diagnosticos y completado para .oracle y .caso</Description>
+  </Metadata>
+  <Installation><InstallationTarget Id="Microsoft.VisualStudio.Code"/></Installation>
+  <Dependencies/>
+  <Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/></Assets>
+</PackageManifest>
+'''
+ctypes = '''<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="json" ContentType="application/json"/>
+  <Default Extension="js" ContentType="application/javascript"/>
+  <Default Extension="vsixmanifest" ContentType="text/xml"/>
+</Types>
+'''
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("extension.vsixmanifest", manifest)
+    z.writestr("[Content_Types].xml", ctypes)
+    for f in sorted(os.listdir(src)):
+        if os.path.isfile(os.path.join(src, f)):
+            z.write(os.path.join(src, f), "extension/" + f)
+MK_ORACLE_VSIX
+    if code --install-extension "$ORACLE_VSIX" --force >/dev/null 2>&1; then
+        ok "Extensión 'oracle-lenguaje' instalada (.oracle y .caso)"
+        [ -f "$HOME/Dev/oracle/tools/lsp.py" ] \
+            || echo "   (nota: ~/Dev/oracle no está clonado; el resaltado anda, los diagnósticos no)"
+    else
+        echo "   (falló instalar oracle-lenguaje)"
+    fi
+    rm -rf "$(dirname "$ORACLE_DIR")"
+fi
+
 # ── 5. Ocultar vistas: OUTLINE/TIMELINE y pestañas extra del panel ──
 # La visibilidad de estas vistas no es un setting: VS Code la guarda en la
 # base SQLite de estado del perfil (~/.config/Code/User/globalStorage/
