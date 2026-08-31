@@ -384,7 +384,7 @@ cat > "$ORACLE_DIR/package.json" << 'ORACLE_PKG'
     "displayName": "Oracle (metalenguaje de medidas)",
     "description": "Resaltado, diagnósticos y completado para .oracle y .caso",
     "publisher": "cs50-taller",
-    "version": "1.0.1",
+    "version": "1.1.4",
     "engines": {
         "vscode": "^1.75.0"
     },
@@ -488,7 +488,25 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 let servidor = null, pendientes = new Map(), siguienteId = 1, buffer = Buffer.alloc(0);
-let diagnosticos = null;
+let diagnosticos = null, registro = null;
+let subrayadoError = null, subrayadoAviso = null;
+const porArchivo = new Map();
+
+// Un cliente que no puede decir por qué el servidor no contesta falla en silencio, que
+// es lo que este proyecto persigue. Todo lo que el servidor escriba en stderr, y todo
+// fallo de arranque, queda registrado.
+//
+// Va a un ARCHIVO además del panel «Output», y no es redundancia: el perfil de aula
+// oculta a propósito las pestañas del panel —`workbench.panel.output` y también
+// `workbench.panel.markers`, o sea PROBLEMS— para dejar sólo la terminal, como
+// cs50.dev. En esa configuración un canal de Output no lo ve nadie.
+const ARCHIVO_REGISTRO = require('path').join(require('os').tmpdir(), 'oracle-vscode.log');
+
+function anotar(texto) {
+    const linea = `${new Date().toISOString().slice(11, 19)}  ${texto}`;
+    if (registro) registro.appendLine(linea);
+    try { require('fs').appendFileSync(ARCHIVO_REGISTRO, linea + '\n'); } catch (e) { /* no importa */ }
+}
 
 function rutaDelServidor() {
     return path.join(process.env.HOME || '', 'Dev', 'oracle', 'tools', 'lsp.py');
@@ -538,34 +556,114 @@ function alRecibir(trozo) {
 
 function publicar(params) {
     if (!diagnosticos) return;
+    const crudos = params.diagnostics || [];
+    anotar(`diagnósticos para ${params.uri}: ${crudos.length}`);
     const uri = vscode.Uri.parse(params.uri);
-    diagnosticos.set(uri, (params.diagnostics || []).map((d) => {
-        const r = d.range;
-        const diag = new vscode.Diagnostic(
-            new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character),
-            d.message,
+    const uri0 = uri.toString();
+    const doc = vscode.workspace.textDocuments.find((x) => x.uri.toString() === uri0);
+    // El servidor ya garantiza un rango con ancho. Esto es sólo la red: si alguna vez
+    // llegara uno vacío —el editor recorta la columna contra el fin de la línea, así
+    // que un error señalado al final de una línea produce uno— se subraya la línea
+    // entera antes que no dibujar nada.
+    const rango = (d) => {
+        const ini = new vscode.Position(d.range.start.line, d.range.start.character);
+        const fin = new vscode.Position(d.range.end.line, d.range.end.character);
+        const pedido = doc ? doc.validateRange(new vscode.Range(ini, fin))
+                           : new vscode.Range(ini, fin);
+        if (!pedido.isEmpty || !doc) return pedido;
+        const linea = doc.lineAt(pedido.start.line);
+        return new vscode.Range(linea.lineNumber, linea.firstNonWhitespaceCharacterIndex,
+                                linea.lineNumber, linea.range.end.character);
+    };
+    diagnosticos.set(uri, crudos.map((d) => {
+        const diag = new vscode.Diagnostic(rango(d), d.message,
             d.severity === 1 ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning);
         diag.source = 'oracle';
         return diag;
     }));
+    // Un rango de un carácter es casi invisible. Se estira hasta el fin de la línea,
+    // que es lo que hace VS Code con sus propios diagnósticos cuando el rango es vacío.
+    porArchivo.set(uri.toString(), crudos.map((d) => ({
+        range: rango(d),
+        hoverMessage: d.message,
+        severidad: d.severity,
+    })));
+    pintar();
+}
+
+// Oracle dibuja SU PROPIO subrayado en vez de confiar en el de VS Code.
+//
+// El perfil de aula replica cs50.dev, y ese perfil trae `problems.visibility: false`
+// —viene del devcontainer.json oficial de CS50, no es un invento de acá—, que apaga
+// los subrayados de TODO el editor. Ese ajuste no acepta configuración por lenguaje:
+// su definición no declara `scope`, así que vale para la ventana entera.
+//
+// Cambiarlo globalmente encendería también Pylance y Java, y rompería la paridad con
+// cs50.dev que es el motivo de este perfil. Una decoración propia no depende de ese
+// ajuste: enciende el subrayado SÓLO para `.oracle` y `.caso`, y deja C, Python y Java
+// exactamente como CS50 los configuró.
+function anutar_editores(visibles) {
+    anotar(`pintar: ${visibles.length} editores visibles · ` + visibles.map(
+        (e) => `${e.document.languageId}:${(porArchivo.get(e.document.uri.toString()) || []).length}`).join(', '));
+}
+
+function pintar() {
+    if (!subrayadoError) return;
+    const visibles = vscode.window.visibleTextEditors;
+    anutar_editores(visibles);
+    for (const editor of visibles) {
+        if (editor.document.languageId !== 'oracle') continue;
+        const marcas = porArchivo.get(editor.document.uri.toString()) || [];
+        editor.setDecorations(subrayadoError, marcas.filter((m) => m.severidad === 1));
+        editor.setDecorations(subrayadoAviso, marcas.filter((m) => m.severidad !== 1));
+    }
 }
 
 function abrir(doc) {
-    if (doc.languageId !== 'oracle') return;
+    if (doc.languageId !== 'oracle' || !servidor) return;
     enviar({ method: 'textDocument/didOpen', params: { textDocument: {
         uri: doc.uri.toString(), languageId: 'oracle', version: doc.version, text: doc.getText() } } });
 }
 
 function activate(contexto) {
     diagnosticos = vscode.languages.createDiagnosticCollection('oracle');
-    contexto.subscriptions.push(diagnosticos);
+    registro = vscode.window.createOutputChannel('Oracle');
+    // Dos capas a propósito. El subrayado ondulado es lo que se espera ver, pero
+    // `textDecoration` es CSS crudo que VS Code puede rechazar entero si algo no le
+    // gusta —pasó con `underline wavy #f14c4c 1px`: el grosor invalidaba la
+    // declaración y no se dibujaba nada—. El fondo tenue y la marca en la regla
+    // lateral no dependen de eso: si el subrayado no sale, el error igual se ve.
+    subrayadoError = vscode.window.createTextEditorDecorationType({
+        textDecoration: 'underline wavy #f14c4c',
+        backgroundColor: 'rgba(241, 76, 76, 0.18)',
+        overviewRulerColor: '#f14c4c',
+        overviewRulerLane: vscode.OverviewRulerLane.Right,
+    });
+    subrayadoAviso = vscode.window.createTextEditorDecorationType({
+        textDecoration: 'underline wavy #cca700',
+        backgroundColor: 'rgba(204, 167, 0, 0.18)',
+        overviewRulerColor: '#cca700',
+        overviewRulerLane: vscode.OverviewRulerLane.Right,
+    });
+    contexto.subscriptions.push(diagnosticos, registro, subrayadoError, subrayadoAviso,
+        vscode.window.onDidChangeVisibleTextEditors(pintar));
 
-    servidor = spawn('python3', [rutaDelServidor()], { stdio: ['pipe', 'pipe', 'pipe'] });
-    servidor.on('error', () => {
-        vscode.window.showWarningMessage(
-            'Oracle: no se pudo iniciar ' + rutaDelServidor() + '. ¿Está clonado ~/Dev/oracle?');
+    const guion = rutaDelServidor();
+    anotar(`— arranque — registro en ${ARCHIVO_REGISTRO}`);
+    anotar(`arrancando: python3 ${guion}`);
+    if (!require('fs').existsSync(guion)) {
+        anotar('NO EXISTE ese archivo. El resaltado funciona; los diagnósticos no.');
+        vscode.window.showWarningMessage(`Oracle: no se encontró ${guion}. ¿Está clonado ~/Dev/oracle?`);
+        return;
+    }
+    servidor = spawn('python3', [guion], { stdio: ['pipe', 'pipe', 'pipe'] });
+    servidor.on('error', (e) => {
+        anotar(`no se pudo arrancar: ${e.message}`);
+        vscode.window.showWarningMessage(`Oracle: no se pudo iniciar el servidor (${e.message}).`);
         servidor = null;
     });
+    servidor.on('exit', (codigo) => anotar(`el servidor terminó con código ${codigo}`));
+    servidor.stderr.on('data', (d) => anotar(`stderr: ${d.toString().trimEnd()}`));
     servidor.stdout.on('data', alRecibir);
 
     enviar({ id: siguienteId++, method: 'initialize', params: {
@@ -612,7 +710,7 @@ src, out = sys.argv[1], sys.argv[2]
 manifest = '''<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
-    <Identity Language="en-US" Id="oracle-lenguaje" Version="1.0.1" Publisher="cs50-taller"/>
+    <Identity Language="en-US" Id="oracle-lenguaje" Version="1.1.4" Publisher="cs50-taller"/>
     <DisplayName>Oracle (metalenguaje de medidas)</DisplayName>
     <Description>Resaltado, diagnosticos y completado para .oracle y .caso</Description>
   </Metadata>
